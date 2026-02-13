@@ -3,8 +3,16 @@ data/raw/*.csv
 data/raw/*.xlsx
 data/raw/*.xls
 
-# Dados processados
+# Dados processados (exceto sample)
 data/processed/
+
+# Sample data (manter no repo para demo)
+# data/sample/
+
+# Credenciais BigQuery
+*.json
+!sql/*.json
+*credentials*.json
 
 # Modelos treinados
 models/*.pkl
@@ -55,3 +63,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Environment variables
+.env
+.env.local
