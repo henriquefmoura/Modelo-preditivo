@@ -1,0 +1,94 @@
+name: Daily Ready-to-Reform Scoring
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: 'Number of days to look back for events'
+        required: false
+        default: '30'
+
+jobs:
+  calculate-scores:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Validate BigQuery configuration
+        run: |
+          if [ -z "${{ secrets.BQ_PROJECT_ID }}" ]; then
+            echo "ERROR: BQ_PROJECT_ID secret is not set"
+            echo "Please configure the following secrets in your repository:"
+            echo "  - BQ_PROJECT_ID: Your Google Cloud project ID"
+            echo "  - BQ_DATASET: Your BigQuery dataset name (default: reformas)"
+            echo "  - BQ_CREDENTIALS_JSON: Your service account JSON key (as a string)"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.BQ_CREDENTIALS_JSON }}" ]; then
+            echo "ERROR: BQ_CREDENTIALS_JSON secret is not set"
+            echo "Please add your Google Cloud service account JSON key as a secret"
+            exit 1
+          fi
+          
+          echo "✓ BigQuery configuration validated"
+      
+      - name: Set up BigQuery credentials
+        run: |
+          echo '${{ secrets.BQ_CREDENTIALS_JSON }}' > /tmp/bq_credentials.json
+          echo "BQ_CREDENTIALS_JSON=/tmp/bq_credentials.json" >> $GITHUB_ENV
+      
+      - name: Run daily scoring job
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET: ${{ secrets.BQ_DATASET || 'reformas' }}
+          BQ_CREDENTIALS_JSON: /tmp/bq_credentials.json
+        run: |
+          LOOKBACK_DAYS="${{ github.event.inputs.lookback_days || '30' }}"
+          python src/run_daily_score.py --lookback_days $LOOKBACK_DAYS
+      
+      - name: Clean up credentials
+        if: always()
+        run: |
+          rm -f /tmp/bq_credentials.json
+      
+      - name: Upload scoring artifacts
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scoring-logs
+          path: |
+            data/processed/scores_*.csv
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Daily scoring job failed"
+          echo "Check the logs above for details"
+          exit 1
